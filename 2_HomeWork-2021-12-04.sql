@@ -1,0 +1,139 @@
+/*
+SELECT * FROM DE.LOG L
+WHERE ROWNUM <= 10;
+
+SELECT * FROM DE.IP I
+WHERE ROWNUM <= 10;
+*/
+
+-- New table DE1M.OSPV_LOG in database
+CREATE TABLE DE1M.OSPV_LOG(
+DT DATE,
+LINK VARCHAR2 (50),
+USER_AGENT VARCHAR2 (200),
+REGION VARCHAR2 (30)
+);
+
+-- New table DE1M.OSPV_LOG_REPORT in database
+CREATE TABLE DE1M.OSPV_LOG_REPORT(
+REGION VARCHAR2 (30),
+BROWSER VARCHAR2 (10)
+);
+
+-- New temperary table DE1M.OSPV_LOG_REPORT_RAW
+CREATE TABLE DE1M.OSPV_LOG_REPORT_RAW(
+REGION VARCHAR2 (30),
+BROWSER VARCHAR2 (10)
+);
+
+
+
+/* CHECK - Parsing of the LOG table */
+SELECT
+	SUBSTR(VAL, 1, INSTR(VAL, CHR(9) )-1) AS IP,
+	TO_DATE( (SUBSTR(VAL, INSTR(VAL, CHR(9),1,3 )+1, 14)),'yyyymmddhh24miss') AS DAT,
+	SUBSTR(VAL, INSTR(VAL, 'http'), INSTR(VAL, CHR(9),1,5) - INSTR(VAL, 'http')) AS LINK,
+	SUBSTR(VAL, INSTR(VAL, CHR(9),1,7)+1, INSTR(VAL, '/',1,4)-1 - INSTR(VAL, CHR(9),1,7)) AS BROWSER,
+	SUBSTR(VAL, INSTR(VAL, CHR(9),1,7)) AS USER_AGENT,
+	VAL
+FROM de.LOG l
+WHERE ROWNUM <= 10;
+
+/* CHECK - Parsing of the IP - REGION table */
+SELECT
+	SUBSTR(VAL, 1, INSTR(VAL, ' ' )-1) AS IP,
+	TRIM(SUBSTR(VAL, INSTR(VAL, ' ' ))) AS REGION,
+	VAL
+FROM de.IP i
+WHERE ROWNUM <= 10;
+
+
+
+/* Fill in OSPV_LOG table */
+INSERT INTO DE1M.OSPV_LOG
+	(DT, LINK, USER_AGENT, REGION)
+WITH lg AS
+(
+SELECT
+	SUBSTR(VAL, 1, INSTR(VAL, ' ' )-1) AS IP,
+	TRIM(SUBSTR(VAL, INSTR(VAL, ' ' ))) AS REGION
+FROM de.IP
+)
+SELECT
+	x.DT,
+	x.LINK,
+	x.USER_AGENT,
+	lg.REGION
+FROM (SELECT
+	SUBSTR(VAL, 1, INSTR(VAL, CHR(9) )-1) AS IP,
+	TO_DATE( (SUBSTR(VAL, INSTR(VAL, CHR(9),1,3 )+1, 14)),'yyyymmddhh24miss') AS DT,
+	SUBSTR(VAL, INSTR(VAL, 'http'), INSTR(VAL, CHR(9),1,5) - INSTR(VAL, 'http')) AS LINK,
+	SUBSTR(VAL, INSTR(VAL, CHR(9),1,7)+1, INSTR(VAL, '/',1,4)-1 - INSTR(VAL, CHR(9),1,7)) AS BROWSER,
+	SUBSTR(VAL, INSTR(VAL, CHR(9),1,7)) AS USER_AGENT
+FROM de.LOG) x
+LEFT JOIN lg ON x.IP = lg.IP; 
+
+/* Fill in OSPV_LOG_REPORT_RAW table */
+INSERT INTO DE1M.OSPV_LOG_REPORT_RAW
+	(REGION, BROWSER)
+WITH lg AS
+(
+SELECT
+	SUBSTR(VAL, 1, INSTR(VAL, ' ' )-1) AS IP,
+	TRIM(SUBSTR(VAL, INSTR(VAL, ' ' ))) AS REGION
+FROM de.IP
+)
+SELECT
+	lg.REGION,
+	x.BROWSER
+FROM (SELECT
+	SUBSTR(VAL, 1, INSTR(VAL, CHR(9) )-1) AS IP,
+	TO_DATE( (SUBSTR(VAL, INSTR(VAL, CHR(9),1,3 )+1, 14)),'yyyymmddhh24miss') AS DT,
+	SUBSTR(VAL, INSTR(VAL, 'http'), INSTR(VAL, CHR(9),1,5) - INSTR(VAL, 'http')) AS LINK,
+	SUBSTR(VAL, INSTR(VAL, CHR(9),1,7)+1, INSTR(VAL, '/',1,4)-1 - INSTR(VAL, CHR(9),1,7)) AS BROWSER,
+	SUBSTR(VAL, INSTR(VAL, CHR(9),1,7)) AS USER_AGENT
+FROM de.LOG) x
+LEFT JOIN lg ON x.IP = lg.IP;
+
+
+
+
+/* Fill in OSPV_LOG_REPORT table */
+INSERT INTO DE1M.OSPV_LOG_REPORT
+	(REGION, BROWSER)
+WITH rbn AS
+(
+    select
+        region,
+        browser,
+        COUNT(browser) AS n
+    from OSPV_LOG_REPORT_RAW
+    GROUP BY region, browser
+    --ORDER BY region, n DESC
+),
+mx AS
+(
+    SELECT 
+        region,
+        MAX(n) AS n
+    FROM (
+        select
+            region,
+            browser,
+            COUNT(browser) AS n
+        from OSPV_LOG_REPORT_RAW
+        GROUP BY region, browser
+        --ORDER BY region, COUNT(browser) DESC
+        )
+    GROUP BY region
+)
+SELECT
+    rbn.region,
+    rbn.browser
+FROM mx
+LEFT JOIN rbn
+    ON mx.n = rbn.n AND mx.region = rbn.region
+ORDER BY region;
+
+/* Drop temp OSPV_LOG_REPORT table */
+DROP TABLE DE1M.OSPV_LOG_REPORT_RAW;

@@ -1,0 +1,8 @@
+a)
+chmod u+x,g+x,o+x quiz.sh
+
+b)
+chmod u+w,g+w quiz.sh
+
+c)
+chmod o-r quiz.sh
